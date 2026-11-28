@@ -29,7 +29,8 @@ import json
 import os
 import sys
 import time
-from datetime import date
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 try:
     import truststore
@@ -226,7 +227,7 @@ def rebuild_html(bundle):
 
 def main():
     token = get_token()
-    today_str = date.today().isoformat()
+    today_str = datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat()
 
     # отдельный "кэш" цен за этот запуск, чтобы не бить по API 2 раза ради
     # одного и того же price_key (IMOEX нужен и MX, и IMOEXF)
@@ -247,15 +248,21 @@ def main():
             last_point, intraday = None, []
         price_cache["_history_done"].add(price_key)
 
-        if last_point is not None:
-            live_price = get_live_price(price_key)
-            if live_price is not None:
-                last_point["price"] = live_price
+        is_live = last_point is not None
 
         oi_history = []
         if os.path.exists(oi_json_path(ticker)):
             with open(oi_json_path(ticker), "r", encoding="utf-8") as f:
                 oi_history = json.load(f)
+
+        if last_point is None:
+            saved_live = load_existing_live(ticker)
+            if not saved_live.empty:
+                saved_day = str(saved_live["tradedate"].iloc[0])
+                if not oi_history or saved_day >= oi_history[-1][0]:
+                    last_point = compute_last_point(saved_live)
+                    if last_point is not None:
+                        print(f"[{ticker}] использую сохранённый снимок за {saved_day}.")
 
         if last_point is None:
             # нечего показать за сегодня — используем последний известный
@@ -272,10 +279,20 @@ def main():
                     "YUR": {"long": last_row[4], "short": last_row[5], "prev_long": last_row[4],
                             "prev_short": last_row[5], "net": last_row[6], "prev_net": last_row[6]},
                 },
-                "price": get_live_price(price_key),
             }
 
         price_history = load_price_history(price_key)
+
+        last_point["isLive"] = is_live
+        if is_live:
+            current_price = get_live_price(price_key)
+            if current_price is not None:
+                last_point["price"] = current_price
+        else:
+            matching_price = next((row[1] for row in reversed(price_history)
+                                   if row[0] == last_point["tradedate"]), None)
+            if matching_price is not None:
+                last_point["price"] = matching_price
 
         bundle[ticker] = {
             "label": cfg["label"],
