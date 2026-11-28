@@ -361,7 +361,7 @@ function loadTicker(key){
       fizLong: f.long, fizShort: f.short, fizNet: f.net,
       yurLong: y.long, yurShort: y.short, yurNet: y.net,
       fizTotal: f.long + f.short, yurTotal: y.long + y.short,
-      isLive: true,
+      isLive: LAST_POINT.isLive !== false,
       price: LAST_PRICE,
     };
   })();
@@ -431,28 +431,30 @@ function deltaHtml(delta){
 }
 
 function deltaCell(delta){
+  if (!Number.isFinite(delta)) return '<td>—</td>';
   const dir = delta > 0 ? 'up' : (delta < 0 ? 'down' : '');
   return `<td class="delta ${dir}">${fmtSigned(delta)}</td>`;
 }
 
 function renderLastPoint(){
-  const prevDay = DATA[DATA.length-1]; // последний закрытый торговый день из бэкфилла
-  document.getElementById('lpNote').textContent = `к предыдущему дню (${fmtDateShort(prevDay.date)}) · контрактов`;
+  const prevDay = DATA.findLast(row => row.date < LAST_POINT.tradedate);
+  const isLive = LAST_POINT.isLive !== false;
+  document.getElementById('lpNote').textContent = prevDay ? `к предыдущему дню (${fmtDateShort(prevDay.date)}) · контрактов` : 'Нет данных за предыдущий торговый день';
   document.getElementById('lpFootnote').textContent =
     `Направленная позиция = Long − Short. Порог заметного изменения: ±${THRESHOLD.toLocaleString('ru-RU')} контрактов к предыдущему дню. Денежная оценка (Δ, млн ₽) — приблизительная, по текущей цене${FX_TICKERS.has(currentTicker) ? ' и текущему курсу USD/RUB' : ''}.`;
   document.getElementById('statusText').textContent =
-    `${LAST_POINT.tradedate.split('-').reverse().join('.')} ${LAST_POINT.last_time.slice(0,5)}, live`;
-  document.querySelector('#statusPill .dot').style.background = 'var(--delta-up)';
+    `${fmtDateShort(LAST_POINT.tradedate)}${LAST_POINT.last_time === '00:00:00' ? '' : ' ' + LAST_POINT.last_time.slice(0,5)} · ${isLive ? 'live' : 'последние доступные данные'}`;
+  document.querySelector('#statusPill .dot').style.background = isLive ? 'var(--delta-up)' : '#64748b';
 
   const rows = [
-    {label:'Физические лица', g: LAST_POINT.groups.FIZ, pLong: prevDay.fizLong, pShort: prevDay.fizShort, pNet: prevDay.fizNet},
-    {label:'Юридические лица', g: LAST_POINT.groups.YUR, pLong: prevDay.yurLong, pShort: prevDay.yurShort, pNet: prevDay.yurNet},
+    {label:'Физические лица', g: LAST_POINT.groups.FIZ, pLong: prevDay?.fizLong, pShort: prevDay?.fizShort, pNet: prevDay?.fizNet},
+    {label:'Юридические лица', g: LAST_POINT.groups.YUR, pLong: prevDay?.yurLong, pShort: prevDay?.yurShort, pNet: prevDay?.yurNet},
   ];
   const tbody = document.getElementById('lpBody');
   tbody.innerHTML = rows.map(r=>{
     const g = r.g;
     const dLong = g.long - r.pLong, dShort = g.short - r.pShort, dNet = g.net - r.pNet;
-    const dMoney = moneyValue(dNet, LAST_PRICE, currentTicker, LAST_POINT.tradedate, true);
+    const dMoney = Number.isFinite(dNet) ? moneyValue(dNet, LAST_PRICE, currentTicker, LAST_POINT.tradedate, isLive) : null;
     const moneyDir = dMoney > 0 ? 'up' : (dMoney < 0 ? 'down' : '');
     return `<tr>
       <td class="grpcell">${r.label}</td>
@@ -472,7 +474,7 @@ function renderLastPoint(){
 
   // insights
   const fiz = LAST_POINT.groups.FIZ, yur = LAST_POINT.groups.YUR;
-  const dFizNet = fiz.net - prevDay.fizNet, dYurNet = yur.net - prevDay.yurNet;
+  const dFizNet = fiz.net - prevDay?.fizNet, dYurNet = yur.net - prevDay?.yurNet;
   const insights = [];
   if (fiz.net < 0){
     insights.push({type:'info', icon:'▼', text:
